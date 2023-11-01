@@ -33,7 +33,7 @@ os.environ['HF_HOME'] = "./huggingface"
 request_queue = "request_queue"  # Name of the Redis queue
 redis_client = redis.StrictRedis(host='localhost', port=6379, db=0)
 
-model_id = "stablediffusionapi/revanimated"
+model_id = "stablediffusionapi/realistic-vision-51"
 print("model loaded")
 pipe = StableDiffusionPipeline.from_pretrained(
         model_id, torch_dtype=torch.float16, safety_checker=None)
@@ -50,7 +50,7 @@ checkpoint = "lllyasviel/sd-controlnet-canny"
 controlnet = ControlNetModel.from_pretrained(
     checkpoint, torch_dtype=torch.float16)
 control = StableDiffusionControlNetPipeline.from_pretrained(
-    "stablediffusionapi/revanimated", controlnet=controlnet, torch_dtype=torch.float16, safety_checker=None
+    "stablediffusionapi/realistic-vision-51", controlnet=controlnet, torch_dtype=torch.float16, safety_checker=None
 )
 
 control.scheduler = UniPCMultistepScheduler.from_config(
