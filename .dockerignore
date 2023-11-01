@@ -1,0 +1,10 @@
+venv
+__pycache__
+.vscode
+=2.0
+*.jpg
+*.png
+*.jpeg
+nohup.out
+*.log 
+dreamshaper?modelVersionId=94081
