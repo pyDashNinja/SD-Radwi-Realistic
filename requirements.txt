@@ -22,3 +22,4 @@ pandas
 gfpgan
 realesrgan
 gunicorn
+redis
