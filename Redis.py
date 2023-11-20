@@ -5,7 +5,7 @@ import redis
 import os
 import base64
 from io import BytesIO
-from diffusers import StableDiffusionPipeline, EulerDiscreteScheduler, EulerAncestralDiscreteScheduler, DPMSolverMultistepScheduler
+from diffusers import StableDiffusionPipeline, EulerDiscreteScheduler, EulerAncestralDiscreteScheduler, DPMSolverMultistepScheduler, EulerAncestralDiscreteScheduler
 from transformers import pipeline, set_seed
 import random
 import re
@@ -24,41 +24,84 @@ from diffusers import (
     StableDiffusionControlNetPipeline,
     ControlNetModel,
     AutoencoderKL,
+    DDIMScheduler
     # StableDiffusionUpscalePipeline
 
 )
+from transformers import pipeline
+from diffusers.pipelines.stable_diffusion import StableDiffusionSafetyChecker
+from ip_adapter import IPAdapter, IPAdapterPlus
 
 os.environ['HF_HOME'] = "./huggingface"
 
 request_queue = "request_queue"  # Name of the Redis queue
 redis_client = redis.StrictRedis(host='localhost', port=6379, db=0)
 
-model_id = "stablediffusionapi/realistic-vision-51"
-print("model loaded")
+MODEL_NAME = "SG161222/Realistic_Vision_V5.1_noVAE"
+VAE_NAME = "stabilityai/sd-vae-ft-mse-original"
+VAE_CKPT = "vae-ft-mse-840000-ema-pruned.ckpt"
+MODEL_CACHE = "cache"
+VAE_CACHE = "vae-cache"
+
+vae = AutoencoderKL.from_single_file(
+"https://huggingface.co/stabilityai/sd-vae-ft-mse-original/blob/main/vae-ft-mse-840000-ema-pruned.safetensors",
+torch_dtype=torch.float16
+#       "https://huggingface.co/Justin-Choo/epiCRealism-Natural_Sin_RC1_VAE/blob/main/epicrealism_naturalSinRC1VAE.safetensors"
+#            "https://huggingface.co/stabilityai/sd-vae-ft-mse-original/blob/main/vae-ft-mse-840000-ema-pruned.safetensors",
+#            cache_dir=VAE_CACHE
+        )
 pipe = StableDiffusionPipeline.from_pretrained(
-        model_id, torch_dtype=torch.float16, safety_checker=None)
-pipe.scheduler = DPMSolverMultistepScheduler.from_config(
-    pipe.scheduler.config, use_karras_sigmas=True
+            MODEL_NAME,
+            vae=vae,
+            torch_dtype=torch.float16,
+            safety_checker=None
 )
+
+#pipe = StableDiffusionPipeline.from_pretrained(
+#        MODEL_NAME, torch_dtype=torch.float16, safety_checker=None)
+##pipe.scheduler = DPMSolverMultistepScheduler.from_config(
+#    pipe.scheduler.config, use_karras_sigmas=True
+#)
+pipe.scheduler = DDIMScheduler(
+    num_train_timesteps=1000,
+    beta_start=0.00085,
+    beta_end=0.012,
+    beta_schedule="scaled_linear",
+    clip_sample=False,
+    set_alpha_to_one=False,
+    steps_offset=1,
+)
+#vae = AutoencoderKL.from_pretrained(VAE_NAME)
+#print("pipe vae", pipe.vae)
+#pipe.vae = vae
 # pipe.enable_model_cpu_offload()
 pipe.enable_xformers_memory_efficient_attention()
 
 pipe = pipe.to("cuda")
 
-checkpoint = "lllyasviel/sd-controlnet-canny"
+image_encoder_path = "./models/image_encoder/"
+ip_ckpt = "./models/ip-adapter-plus-face_sd15.bin"
+device = "cuda"
+#checkpoint = "lllyasviel/sd-controlnet-canny"
+#depth_estimator = pipeline('depth-estimation')
+#controlnet = ControlNetModel.from_pretrained(
+#   checkpoint, torch_dtype=torch.float16)
+#control = StableDiffusionControlNetPipeline.from_pretrained(
+#    MODEL_NAME, controlnet=controlnet, vae=vae, torch_dtype=torch.float16 ,safety_checker=None
+#)
 
-controlnet = ControlNetModel.from_pretrained(
-    checkpoint, torch_dtype=torch.float16)
-control = StableDiffusionControlNetPipeline.from_pretrained(
-    "stablediffusionapi/realistic-vision-51", controlnet=controlnet, torch_dtype=torch.float16, safety_checker=None
-)
-
-control.scheduler = UniPCMultistepScheduler.from_config(
-    control.scheduler.config)
-# control.enable_model_cpu_offload()
-control.enable_xformers_memory_efficient_attention()
-control = control.to("cuda")
-
+#control.scheduler = UniPCMultistepScheduler.from_config(
+#    control.scheduler.config)
+#control.scheduler = EulerAncestralDiscreteScheduler(
+#                beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear"
+#            )
+#control.enable_model_cpu_offload()
+#control.enable_xformers_memory_efficient_attention()
+#control = control.to("cuda")
+import copy
+copied_pipe = copy.deepcopy(pipe)
+ip_model = IPAdapterPlus(copied_pipe, image_encoder_path, ip_ckpt, device, num_tokens=16)
+#ip_model = []
 
 def process_request(data):
     try:
@@ -84,7 +127,7 @@ def process_request(data):
         if model == 'base':
             try:
                 lora = str(data['lora'])
-                print("lora", lora)
+                print("lora", lora)#
 
                 if lora != "None":
                     print("here inside lora")
@@ -170,42 +213,54 @@ def process_request(data):
         # read image as pillow and convert it to base64string image
         elif model == 'control':
             image = data['control_image']
-            low = int(ast.literal_eval(data['low']))
-            high = int(ast.literal_eval(data['high']))
-            guessmode = bool(data['guessmode'])
+            #low = int(ast.literal_eval(data['low']))
+            #high = int(ast.literal_eval(data['high']))
+            #guessmode = bool(data['guessmode'])
 
-            try:
-                lora = str(data['lora'])
+            #try:
+            #    lora = str(data['lora'])#
 
-                if lora:
-                    lora_strength = float(data['lora_strength'])
-                    lora_filename = f"{lora}.safetensors"
-                    control.load_lora_weights(
-                        f"./lora/{lora}", weight_name=lora_filename)
-                    lora_prompt = ""
+            #    if lora:
+            #        lora_strength = float(data['lora_strength'])
+            #        lora_filename = f"{lora}.safetensors"
+            #        control.load_lora_weights(
+            #            f"./lora/{lora}", weight_name=lora_filename)
+            #        lora_prompt = ""
 
-                    if lora == 'add_detail':
-                        lora_prompt = "<lora:add_detail:" + \
-                            str(lora_strength) + ">, "
+#                    if lora == 'add_detail':
+#                        lora_prompt = "<lora:add_detail:" + \
+#                            str(lora_strength) + ">, "
                             
-                else:
-                    lora_prompt = ""
+#                else:
+#                    lora_prompt = ""
 
-            except:
+ #           except:
                 # lora_strength = 1
                 # lora_filename = "add_detail.safetensors"
                 # control.load_lora_weights(
                 #     "OedoSoldier/detail-tweaker-lora", weight_name=lora_filename)
                 # lora_prompt = "<lora:add_detail:" + \
                 #     str(lora_strength) + ">, "
-                lora_prompt = ""
-            print("prompt 1", prompt)
-            print("lora prompt", lora_prompt)
+#                lora_prompt = ""
+#            print("prompt 1", prompt)
+#            print("lora prompt", lora_prompt)
 
             # convert image from base64string to PIL image
             image = Image.open(BytesIO(base64.b64decode(image)))
-            # image.save("control.png")
-            # print(image.size)
+            width, height = image.size
+            if width*height >= 1024*1024:
+              image = image.convert("RGB")
+              # get size of image
+              width, height = image.size
+              # resize image in such a way width and height product never exceeds 1500*1500
+              while width*height >= 1024*1024:
+                width = int(width*0.8)
+                height = int(height*0.8)
+        # make width height divisible by 8
+                width = width - (width % 8)
+                height = height - (height % 8)
+              image = image.resize((width, height))
+              print(image.size,"image size")
             # # get the image width and height
             # width, height = image.size
             # if width*height > 3000*3000:
@@ -250,26 +305,43 @@ def process_request(data):
             # image /= np.sum(image ** 2.0, axis=2, keepdims=True) ** 0.5
             # image = (image * 127.5 + 127.5).clip(0, 255).astype(np.uint8)
             # image = Image.fromarray(image)
-            image = np.array(image)
-
-            low_threshold = low
-            high_threshold = high
-
-            image = cv2.Canny(image, low_threshold, high_threshold)
-            image = image[:, :, None]
-            image = np.concatenate([image, image, image], axis=2)
-            control_image = Image.fromarray(image)
-            control_image.save('sd-generated-image.jpeg',
-                               optimize=True, quality=80)
-            # change size of image
-            prompt = lora_prompt + prompt
-            print(prompt, "prompt")
+            #image = np.array(image)
+            #image = depth_estimator(image)['depth']
+            #image = np.array(image)
+            #image = image[:, :, None]
+            #image = np.concatenate([image, image, image], axis=2)
+            #control_image = Image.fromarray(image)
             try:
                 height = int(ast.literal_eval(data['height']))
                 width = int(ast.literal_eval(data['width']))
             except:
                 height = 512
                 width = 512
+            #ip_model = IPAdapter(pipe, image_encoder_path, ip_ckpt, device)
+            #image = ip_model.generate(pil_image=image, num_samples=1, num_inference_steps=35, seed=42)
+
+            #images = ip_model.generate(pil_image=image, num_samples=4, num_inference_steps=, seed=42)
+            image = ip_model.generate(pil_image=image, num_samples=1, num_inference_steps=steps, seed=seed,
+                prompt=prompt, scale=0.6, height=height, width=width)
+#, width=width, height=height)
+            #low_threshold = low
+            #high_threshold = high
+
+            #image = cv2.Canny(image, low_threshold, high_threshold)
+            #image = image[:, :, None]
+            #image = np.concatenate([image, image, image], axis=2)
+            #control_image = Image.fromarray(image)
+            #control_image.save('sd-generated-image.jpeg',
+             #                  optimize=True, quality=80)
+            #print("controlnet")
+            #prompt = lora_prompt + prompt
+            #print(prompt, "prompt")
+            #try:
+            #    height = int(ast.literal_eval(data['height']))
+            #    width = int(ast.literal_eval(data['width']))
+            #except:
+            #    height = 512
+            #    width = 512
             print(height, width, "height and width")
 
             # image.save("sd-generated-image.jpeg")
@@ -279,12 +351,16 @@ def process_request(data):
             #                 text_encoder=pipe.text_encoder)
             # prompt_embeds = compel.build_conditioning_tensor(
             #     prompt) if prompt else None
-            image = control(prompt=prompt, negative_prompt=nprompt, width=width, height=height, guidance_scale=gscale, num_inference_steps=steps,
-                            generator=generator, guess_mode=guessmode, image=control_image).images[0]
+            #image = control(prompt=prompt, negative_prompt=nprompt, width=width, height=height, guidance_scale=gscale, num_inference_steps=steps,
+            #                generator=generator, guess_mode=guessmode, image=control_image).images[0]
             # image = control(prompt=prompt, negative_prompt=nprompt, width=width, height=height, guidance_scale=gscale, num_inference_steps=steps,
-            #                 generator=generator, image=image).images[0]
-            control.unload_lora_weights()
-            
+            #
+#                 generator=generator, image=image).images[0]
+            try:
+                image = image[0]
+            except:
+                pass
+            print(image,"image")
 
         # elif model == 'upscale':
         #     print(model, "model")
@@ -337,16 +413,17 @@ def process_request(data):
         image.save(name)
     except Exception as E:
         # write error to a csv file with the name of the image, timestamp, error using pandas
-        try:
-            df = pd.read_csv('error.csv')
-        except:
-            df = pd.DataFrame(columns=['name', 'timestamp', 'error'])
+        #try:
+        #    df = pd.read_csv('error.csv')
+        #except:
+        #    df = pd.DataFrame(columns=['name', 'timestamp', 'error'])
 
         # append row to the dataframe
-        df = df.append({'name': name, 'timestamp': time.time(), 'error': E}, ignore_index=True)
+        #df = df.append({'name': name, 'timestamp': time.time(), 'error': E}, ignore_index=True)
 
         # overwrite the csv file
-        df.to_csv('error.csv', index=False)
+        #df.to_csv('error.csv', index=False)
+        print(E,"exception")
 
 def worker():
     while True:
@@ -366,4 +443,4 @@ workers = []
 for _ in range(num_workers):
     t = threading.Thread(target=worker)
     t.start()
-    workers.append(t)
+    workers.append(t
