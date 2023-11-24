@@ -24,7 +24,8 @@ from diffusers import (
     StableDiffusionControlNetPipeline,
     ControlNetModel,
     AutoencoderKL,
-    DDIMScheduler
+    DDIMScheduler,
+    StableDiffusionInpaintPipelineLegacy
     # StableDiffusionUpscalePipeline
 
 )
@@ -38,6 +39,7 @@ request_queue = "request_queue"  # Name of the Redis queue
 redis_client = redis.StrictRedis(host='localhost', port=6379, db=0)
 
 MODEL_NAME = "SG161222/Realistic_Vision_V5.1_noVAE"
+MODEL_NAME_INPAINT = "SG161222/Realistic_Vision_V5.1_noVAE"
 VAE_NAME = "stabilityai/sd-vae-ft-mse-original"
 VAE_CKPT = "vae-ft-mse-840000-ema-pruned.ckpt"
 MODEL_CACHE = "cache"
@@ -79,8 +81,32 @@ pipe.enable_xformers_memory_efficient_attention()
 
 pipe = pipe.to("cuda")
 
+
+pipe_two = StableDiffusionInpaintPipelineLegacy.from_pretrained(
+    MODEL_NAME_INPAINT,
+    torch_dtype=torch.float16,
+    vae=vae,
+    feature_extractor=None,
+    safety_checker=None
+)
+
+pipe_two.scheduler = DDIMScheduler(
+    num_train_timesteps=1000,
+    beta_start=0.00085,
+    beta_end=0.012,
+    beta_schedule="scaled_linear",
+    clip_sample=False,
+    set_alpha_to_one=False,
+    steps_offset=1,
+)
+
+pipe_two.enable_xformers_memory_efficient_attention()
+
+pipe_two = pipe_two.to("cuda")
+
 image_encoder_path = "./models/image_encoder/"
 ip_ckpt = "./models/ip-adapter-plus-face_sd15.bin"
+#ip_ckpt = "models/ip-adapter_sd15.bin"
 device = "cuda"
 #checkpoint = "lllyasviel/sd-controlnet-canny"
 #depth_estimator = pipeline('depth-estimation')
@@ -98,9 +124,7 @@ device = "cuda"
 #control.enable_model_cpu_offload()
 #control.enable_xformers_memory_efficient_attention()
 #control = control.to("cuda")
-import copy
-copied_pipe = copy.deepcopy(pipe)
-ip_model = IPAdapterPlus(copied_pipe, image_encoder_path, ip_ckpt, device, num_tokens=16)
+ip_model = IPAdapterPlus(pipe_two, image_encoder_path, ip_ckpt, device, num_tokens=16)
 #ip_model = []
 
 def process_request(data):
@@ -319,10 +343,22 @@ def process_request(data):
                 width = 512
             #ip_model = IPAdapter(pipe, image_encoder_path, ip_ckpt, device)
             #image = ip_model.generate(pil_image=image, num_samples=1, num_inference_steps=35, seed=42)
+            masked_image = Image.open('masked_image.png').convert("RGB")
+            mask = Image.open('mask.png').convert('RGB')
+            #rgb_image = Image.new("RGB", mask.size, (255, 255, 255))
+
+            # Paste the original image onto the new RGB image, using the alpha channel as a mask
+            #rgb_image.paste(mask, mask=mask.split()[3])
+            #gray_image = mask.convert("L")
+
+            # Convert the grayscale image to binary black and white
+            #mask = gray_image.point(lambda x: 0 if x < 128 else 255, '1').convert("RGB")
 
             #images = ip_model.generate(pil_image=image, num_samples=4, num_inference_steps=, seed=42)
             image = ip_model.generate(pil_image=image, num_samples=1, num_inference_steps=steps, seed=seed,
-                prompt=prompt, scale=0.6, height=height, width=width)
+                image=masked_image,mask_image=mask , strength=0.7)
+#pil_image=image, num_samples=4, num_inference_steps=50,
+#                           seed=42, image=masked_image, mask_image=mask, strength=0.7, 
 #, width=width, height=height)
             #low_threshold = low
             #high_threshold = high
@@ -443,4 +479,4 @@ workers = []
 for _ in range(num_workers):
     t = threading.Thread(target=worker)
     t.start()
-    workers.append(t
+    workers.append(t)
