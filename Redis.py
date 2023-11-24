@@ -100,23 +100,23 @@ def process_request(data):
         gc.collect()
         data_str = data.decode('utf-8')
         data = ast.literal_eval(data_str)
-        name = str(data['name'])
-        # print(data)
-        prompt = data['prompt']
-
-        nprompt = data['nprompt']
-        # print("----------------------------------------------")
-        # print(prompt)
-        seed = int(ast.literal_eval(data['seed']))
-        steps = int(ast.literal_eval(data['steps']))
-        gscale = float(ast.literal_eval(data['gscale']))
         model = str(data['model'])
 
-        generator = torch.Generator()
-        generator.manual_seed(seed)
-        print("prompt 1", prompt)
-
         if model == 'base':
+            name = str(data['name'])
+            # print(data)
+            prompt = data['prompt']
+    
+            nprompt = data['nprompt']
+            # print("----------------------------------------------")
+            # print(prompt)
+            seed = int(ast.literal_eval(data['seed']))
+            steps = int(ast.literal_eval(data['steps']))
+            gscale = float(ast.literal_eval(data['gscale']))
+            
+            generator = torch.Generator()
+            generator.manual_seed(seed)
+            print("prompt 1", prompt)
             try:
                 lora = str(data['lora'])
                 print("lora", lora)#
@@ -165,6 +165,7 @@ def process_request(data):
             
         elif model == 'control':
             image = data['control_image']
+            name = str(data['name'])
            
             image = Image.open(BytesIO(base64.b64decode(image)))
             width, height = image.size
@@ -187,11 +188,19 @@ def process_request(data):
             template_mask = f'./template/{str(data['template'])}/mask.png'
             masked_image = Image.open(template_masked_image).convert("RGB")
             mask = Image.open(template_mask).convert('RGB')
+
+            try:
+                seed = int(ast.literal_eval(data['seed']))
+                steps = int(ast.literal_eval(data['steps']))
+                strength = float(ast.literal_eval(data['strength']))
+            except:
+                seed = int(random.randint(0, 100000))
+                steps = 30
+                strength = 0.7
+
             
             image = ip_model.generate(pil_image=image, num_samples=1, num_inference_steps=steps, seed=seed,
-                image=masked_image,mask_image=mask , strength=0.7)
-
-            print(height, width, "height and width")
+                image=masked_image,mask_image=mask , strength=strength)
 
             try:
                 image = image[0]
