@@ -42,6 +42,7 @@ from diffusers import (
     ControlNetModel,
     AutoencoderKL,
 )
+from gfpgan.utils import GFPGANer
 
 def before_first_request(f):
     already_run = False
@@ -87,6 +88,9 @@ def load_model():
     half = True if torch.cuda.is_available() else False
     upsampler = RealESRGANer(scale=4, model_path=model_path,
                              model=model, tile=0, tile_pad=10, pre_pad=0, half=half)
+    global face_enhancer
+    face_enhancer = GFPGANer(
+        model_path='./weights/GFPGANv1.4.pth', upscale=2, bg_upsampler=upsampler, arch='clean', channel_multiplier=2)
 
 
 @app.route('/upscale', methods=['POST'])
@@ -132,7 +136,7 @@ def initv2():
     try:
         # check if get request 
         if request.method == 'GET':
-            return "http://18.222.34.232:5000"
+            return "http://35.224.243.212:5000"
 
         data = request.json
         print(data, "data")
@@ -157,23 +161,29 @@ def initv2():
                 image = cv2.imread(name)
                 image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
                 try:
-                    # image = image.convert("RGBA")
-                    scale = 4
-                    # convert image into numpy
-                    image = np.array(image)
-                    image = upsampler.enhance(image, outscale=scale)
-                    # print(image.shape, "image shape")
-                    # print("image", image)
+                    if data['model'] == 'base':
+                      # image = image.convert("RGBA")
+                      scale = 4
+                      # convert image into numpy
+                      image = np.array(image)
+                      image = upsampler.enhance(image, outscale=scale)
+                      # print(image.shape, "image shape")
+                      # print("image", image)
+                    elif data['model'] == 'control':
+                      image = inference(face_enhancer, image)
+
+                      image = image.convert("RGB")
                 except Exception as E:
                     print(E)
                 
                 print("done scale out")
-
-                image = image[0]
-                # print("image", image)
-                image = Image.fromarray(image)
-                # compress image
-
+                try:
+                        image = image[0]
+                        # print("image", image)
+                        image = Image.fromarray(image)
+                        # compress image
+                except:
+                        pass
                 compressed_image = io.BytesIO()
                 image.save(compressed_image, format='JPEG', quality=50, optimize=True)
                 compressed_image.seek(0)  # Reset the stream position
